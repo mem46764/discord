@@ -13,7 +13,7 @@ load_dotenv()
 
 # Bot configuration
 TOKEN = os.getenv('DISCORD_TOKEN')
-ADMIN_USER_ID = 568353089791328273  # User who can grant licenses
+ADMIN_USER_ID = int(os.getenv('ADMIN_USER_ID', '568353089791328273'))  # User who can grant licenses
 DATABASE_FILE = 'backup_bot.db'
 
 # Bot setup
@@ -166,8 +166,9 @@ def generate_backup_id() -> str:
 
 
 def generate_password(length: int = 16) -> str:
-    """Generate a random password"""
-    characters = string.ascii_letters + string.digits + string.punctuation
+    """Generate a random password with Discord-safe characters"""
+    # Use alphanumeric and safe special characters only (exclude quotes, backticks, etc.)
+    characters = string.ascii_letters + string.digits + '!@#$%^&*()-_=+[]{}|;:,.<>?'
     return ''.join(random.choice(characters) for _ in range(length))
 
 
@@ -194,10 +195,28 @@ class VerifyView(discord.ui.View):
     @discord.ui.button(label='利用規約を確認', style=discord.ButtonStyle.gray)
     async def terms_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Handle terms of service button click"""
-        await interaction.response.send_message(
-            '利用規約の内容をここに表示します。\n（実装する際は適切な利用規約を設定してください）',
-            ephemeral=True
-        )
+        # TODO: Replace with actual terms of service content
+        terms_text = """
+**利用規約**
+
+1. **サービスの利用**
+   - 本Botは認証とバックアップ機能を提供します
+   - 不正利用は禁止されています
+
+2. **データの取り扱い**
+   - ユーザーIDと認証情報を保存します
+   - データは適切に管理され、第三者に提供されません
+
+3. **免責事項**
+   - サービスの利用は自己責任で行ってください
+   - データの損失や不具合について一切の責任を負いません
+
+4. **規約の変更**
+   - 利用規約は予告なく変更される場合があります
+
+詳細は管理者にお問い合わせください。
+        """
+        await interaction.response.send_message(terms_text, ephemeral=True)
 
 
 class AdminView(discord.ui.View):
@@ -230,8 +249,11 @@ class AdminView(discord.ui.View):
         # Defer the response as this might take time
         await interaction.response.defer(ephemeral=True)
         
-        # Try to re-invite users
-        success_count = 0
+        # Process authenticated users
+        # Note: Discord bots cannot force re-invite users without OAuth2 permissions
+        # This implementation identifies users and prepares backup data
+        active_count = 0
+        left_count = 0
         failed_users = []
         
         for user_data in users:
@@ -241,22 +263,25 @@ class AdminView(discord.ui.View):
             try:
                 guild = bot.get_guild(guild_id)
                 if guild:
-                    # Check if user is not in guild
                     member = guild.get_member(user_id)
-                    if not member:
-                        # Try to create an invite and send it
-                        # Note: Actual force re-invite requires OAuth2 flow
-                        # This is a simplified version
-                        success_count += 1
+                    if member:
+                        active_count += 1
                     else:
-                        success_count += 1
-            except Exception as e:
+                        left_count += 1
+                        # Note: Actual force re-invite requires:
+                        # 1. OAuth2 authorization with guilds.join scope
+                        # 2. User's OAuth2 access token
+                        # 3. PUT request to add member to guild
+            except Exception:
                 failed_users.append(user_id)
         
         # Send result
-        result_msg = f'✅ {success_count}人のメンバーをバックアップしました。'
+        result_msg = f'📊 バックアップ状態:\n'
+        result_msg += f'✅ サーバー内: {active_count}人\n'
+        result_msg += f'📤 退出済み: {left_count}人\n'
         if failed_users:
-            result_msg += f'\n❌ 失敗: {len(failed_users)}人'
+            result_msg += f'❌ エラー: {len(failed_users)}人\n'
+        result_msg += f'\n⚠️ 注意: メンバーの強制復帰にはOAuth2認証が必要です。'
         
         await interaction.followup.send(result_msg, ephemeral=True)
 
@@ -397,36 +422,38 @@ async def backup(interaction: discord.Interaction, backup_id: str, password: str
         )
         return
     
-    # Try to re-invite users who left
-    reinvited_users = []
-    already_in_server = []
+    # Analyze backup status
+    active_members = []
+    left_members = []
     
     for user_id in user_ids:
         member = guild.get_member(user_id)
         if member:
-            already_in_server.append(member.name)
+            active_members.append(member.name)
         else:
             # User has left the server
-            # Note: Actual force re-invite requires OAuth2 flow with proper permissions
-            # This is a simplified version that would need additional implementation
             try:
                 user = await bot.fetch_user(user_id)
-                reinvited_users.append(user.name)
-                # In a real implementation, you would:
-                # 1. Create an invite link
-                # 2. Send it to the user
-                # 3. Or use OAuth2 to add them back if you have the proper scope
-            except Exception as e:
-                pass
+                left_members.append(user.name)
+            except Exception:
+                left_members.append(f'User#{user_id}')
     
-    # Send result
+    # Send detailed backup report
     result_parts = []
-    if reinvited_users:
-        result_parts.append(f'✅ 対象メンバーを強制復帰させました: {", ".join(reinvited_users)}')
-    if already_in_server:
-        result_parts.append(f'ℹ️ 既にサーバーにいるメンバー: {", ".join(already_in_server)}')
-    if not reinvited_users and not already_in_server:
-        result_parts.append('対象メンバーが見つかりませんでした。')
+    result_parts.append(f'📊 **バックアップレポート**\n')
+    result_parts.append(f'✅ サーバー内のメンバー: {len(active_members)}人')
+    if active_members:
+        result_parts.append(f'   {", ".join(active_members[:10])}' + ('...' if len(active_members) > 10 else ''))
+    
+    result_parts.append(f'\n📤 退出済みメンバー: {len(left_members)}人')
+    if left_members:
+        result_parts.append(f'   {", ".join(left_members[:10])}' + ('...' if len(left_members) > 10 else ''))
+    
+    if left_members:
+        result_parts.append(f'\n⚠️ **注意**: メンバーの強制復帰には以下が必要です：')
+        result_parts.append(f'• OAuth2認証 (guilds.join scope)')
+        result_parts.append(f'• 各ユーザーのOAuth2アクセストークン')
+        result_parts.append(f'現在のバージョンでは、退出メンバーの検出のみが可能です。')
     
     await interaction.followup.send('\n'.join(result_parts), ephemeral=True)
 
@@ -490,7 +517,7 @@ async def license_cmd(interaction: discord.Interaction, user_id: str):
     try:
         user = await bot.fetch_user(target_user_id)
         user_mention = user.mention
-    except:
+    except Exception:
         user_mention = f'<@{target_user_id}>'
     
     await interaction.response.send_message(

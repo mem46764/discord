@@ -31,6 +31,9 @@ wheels/
 *.sqlite
 *.sqlite3
 
+# Test files
+test_database.py
+
 # IDE
 .vscode/
 .idea/
