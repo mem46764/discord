@@ -13,7 +13,11 @@ load_dotenv()
 
 # Bot configuration
 TOKEN = os.getenv('DISCORD_TOKEN')
-ADMIN_USER_ID = int(os.getenv('ADMIN_USER_ID', '568353089791328273'))  # User who can grant licenses
+try:
+    ADMIN_USER_ID = int(os.getenv('ADMIN_USER_ID', '568353089791328273'))
+except ValueError:
+    print('Error: ADMIN_USER_ID must be a valid numeric Discord user ID')
+    exit(1)
 DATABASE_FILE = 'backup_bot.db'
 
 # Bot setup
@@ -167,8 +171,8 @@ def generate_backup_id() -> str:
 
 def generate_password(length: int = 16) -> str:
     """Generate a random password with Discord-safe characters"""
-    # Use alphanumeric and safe special characters only (exclude quotes, backticks, etc.)
-    characters = string.ascii_letters + string.digits + '!@#$%^&*()-_=+[]{}|;:,.<>?'
+    # Use alphanumeric and safe special characters only
+    characters = string.ascii_letters + string.digits + '!@#$%^&*()-_=+'
     return ''.join(random.choice(characters) for _ in range(length))
 
 
@@ -195,7 +199,8 @@ class VerifyView(discord.ui.View):
     @discord.ui.button(label='利用規約を確認', style=discord.ButtonStyle.gray)
     async def terms_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Handle terms of service button click"""
-        # TODO: Replace with actual terms of service content
+        # NOTE: Before production deployment, replace with actual terms of service
+        # Consult with legal team or service administrator for appropriate content
         terms_text = """
 **利用規約**
 
